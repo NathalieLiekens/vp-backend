@@ -20,7 +20,7 @@ console.log('STRIPE_SECRET_KEY:', process.env.STRIPE_SECRET_KEY ? 'Set' : 'Missi
 console.log('OWNER_EMAIL:', process.env.OWNER_EMAIL || 'Missing');
 
 app.use(cors({
-  origin: process.env.SITE_URL || 'http://localhost:5173', // Allow production or local
+  origin: ['https://villapurabali.com', 'http://localhost:5173'],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type']
 }));

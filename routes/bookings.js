@@ -12,51 +12,43 @@ router.post('/', async (req, res) => {
 
   try {
     const { firstName, lastName, email, startDate, endDate, adults, kids, total, arrivalTime, specialRequests, discountCode } = req.body;
+
+    // Validate required fields
     if (!firstName?.trim() || !lastName?.trim()) {
       console.error('Missing firstName or lastName:', { firstName, lastName });
       return res.status(400).json({ error: 'First and last name are required' });
     }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      console.error('Invalid email provided:', email);
+      return res.status(400).json({ error: 'Invalid email address provided' });
+    }
+    if (!startDate || !endDate) {
+      console.error('Missing dates:', { startDate, endDate });
+      return res.status(400).json({ error: 'Check-in and check-out dates are required' });
+    }
+
     const guestName = `${firstName.trim()} ${lastName.trim()}`;
     const checkInDate = new Date(startDate);
     const checkOutDate = new Date(endDate);
 
-    console.log('Fetching blocked dates from:', process.env.SITE_URL);
-
-    // Fetch blocked dates
-    const response = await fetch(`${process.env.SITE_URL}/api/blocked-dates`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch blocked dates: ${response.statusText}`);
-    }
-    const blockedDates = await response.json();
-    console.log('Blocked dates:', blockedDates);
-
-    // Check for blocked dates
-    for (let d = new Date(checkInDate); d < checkOutDate; d.setDate(d.getDate() + 1)) {
-      const isBlocked = blockedDates.some(blocked =>
-        d >= new Date(blocked.start) && d < new Date(blocked.end)
-      );
-      if (isBlocked) {
-        console.log('Blocked date found:', d);
-        return res.status(400).json({ error: 'Selected dates include unavailable dates' });
-      }
+    // Validate dates
+    if (isNaN(checkInDate) || isNaN(checkOutDate) || checkInDate >= checkOutDate) {
+      console.error('Invalid dates:', { checkInDate, checkOutDate });
+      return res.status(400).json({ error: 'Invalid date range' });
     }
 
     let clientSecret = null;
     let paymentIntentId = null;
 
-    // Create Stripe payment intent if total > 0
-    if (parseFloat(total) > 0) {
+    // Create Stripe payment intent if total > 0 and not TESTFREE
+    if (parseFloat(total) > 0 && discountCode !== 'TESTFREE') {
       console.log('Creating Stripe payment intent for total:', total, 'with email:', email);
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        console.error('Invalid email provided:', email);
-        return res.status(400).json({ error: 'Invalid email address provided' });
-      }
       const paymentIntent = await stripe.paymentIntents.create({
         amount: Math.round(parseFloat(total) * 100),
         currency: 'aud',
         description: 'Villa Pura Bali Booking',
         receipt_email: email,
-        metadata: { guestName, email, checkInDate, checkOutDate }
+        metadata: { guestName, email, checkInDate: checkInDate.toISOString(), checkOutDate: checkOutDate.toISOString() }
       });
       clientSecret = paymentIntent.client_secret;
       paymentIntentId = paymentIntent.id;
@@ -68,14 +60,14 @@ router.post('/', async (req, res) => {
       email,
       checkInDate,
       checkOutDate,
-      adults,
-      kids,
-      total: parseFloat(total || 0),
-      arrivalTime,
-      specialRequests,
-      paymentStatus: parseFloat(total || 0) > 0 ? 'pending' : 'completed',
+      adults: parseInt(adults) || 1,
+      kids: parseInt(kids) || 0,
+      total: parseFloat(total) || 0,
+      arrivalTime: arrivalTime || '',
+      specialRequests: specialRequests || '',
+      paymentStatus: parseFloat(total) > 0 && discountCode !== 'TESTFREE' ? 'pending' : 'completed',
       paymentIntentId,
-      discountCode
+      discountCode: discountCode || ''
     });
 
     console.log('Saving booking:', booking);
@@ -96,7 +88,7 @@ router.post('/', async (req, res) => {
           <p><strong>Check-in:</strong> ${checkInDate.toLocaleDateString('en-ID', { timeZone: 'Asia/Makassar' })} at 2:00 PM</p>
           <p><strong>Check-out:</strong> ${checkOutDate.toLocaleDateString('en-ID', { timeZone: 'Asia/Makassar' })} at 11:00 AM</p>
           <p><strong>Guests:</strong> ${adults} adults, ${kids || 0} kids</p>
-          <p><strong>Total:</strong> AUD $${total || 0}</p>
+          <p><strong>Total:</strong> AUD $${parseFloat(total || 0).toFixed(2)}</p>
           <p><strong>Arrival Time:</strong> ${arrivalTime || 'Not specified'}</p>
           <p><strong>Special Requests:</strong> ${specialRequests || 'None'}</p>
           <p><strong>Discount Code:</strong> ${discountCode || 'None'}</p>
@@ -122,7 +114,7 @@ router.post('/', async (req, res) => {
             <p><strong>Check-in:</strong> ${checkInDate.toLocaleDateString('en-ID', { timeZone: 'Asia/Makassar' })} at 2:00 PM</p>
             <p><strong>Check-out:</strong> ${checkOutDate.toLocaleDateString('en-ID', { timeZone: 'Asia/Makassar' })} at 11:00 AM</p>
             <p><strong>Guests:</strong> ${adults} adults, ${kids || 0} kids</p>
-            <p><strong>Total:</strong> AUD $${total || 0}</p>
+            <p><strong>Total:</strong> AUD $${parseFloat(total || 0).toFixed(2)}</p>
             <p><strong>Arrival Time:</strong> ${arrivalTime || 'Not specified'}</p>
             <p><strong>Special Requests:</strong> ${specialRequests || 'None'}</p>
             <p><strong>Discount Code:</strong> ${discountCode || 'None'}</p>
@@ -138,7 +130,7 @@ router.post('/', async (req, res) => {
     console.log(`iCal update needed: Block dates from ${checkInDate.toLocaleDateString('en-ID', { timeZone: 'Asia/Makassar' })} to ${checkOutDate.toLocaleDateString('en-ID', { timeZone: 'Asia/Makassar' })} for booking ID ${savedBooking._id}`);
 
     res.status(200).json({
-      clientSecret: clientSecret || null,
+      clientSecret,
       bookingId: savedBooking._id,
       paymentIntentId
     });
